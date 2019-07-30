@@ -114,14 +114,14 @@ def benchmark(rnn):
     for i in range(NUM_ITERATION):
         rnn.forward()
     end = time.time()
-    print("Takes %f to forward %d times," % (end - start, NUM_ITERATION))
+    print("Takes %f sec to forward %d times," % (end - start, NUM_ITERATION))
 
     rnn.prepare_backward()
     start = time.time()
     for i in range(NUM_ITERATION):
         rnn.backward()
     end = time.time()
-    print("Takes %f to backward %d times," % (end - start, NUM_ITERATION))
+    print("Takes %f sec to backward %d times," % (end - start, NUM_ITERATION))
 
 
 def main():
