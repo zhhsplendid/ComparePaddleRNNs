@@ -2,7 +2,7 @@
 
 Compare static and dynamic RNNs of PaddlePaddle
 
-Usage:
+## Usage:
 
 Please install PaddlePaddle before running the scripts in this repo
 
@@ -10,7 +10,7 @@ Please install PaddlePaddle before running the scripts in this repo
 sh run.sh
 ```
 
-Current result (updated on July 31, 2019)
+## Current result (updated on July 31, 2019)
 
 
 StaticRNN benchmark
