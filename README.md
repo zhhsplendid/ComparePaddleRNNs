@@ -1,6 +1,6 @@
 # ComparePaddleRNNs
 
-Compare static and dynamic RNNs of PaddlePaddle
+Compare static and dynamic RNNs of PaddlePaddle, also a RNN implemented by "for" loop
 
 ## Usage:
 
@@ -14,13 +14,19 @@ sh run.sh
 
 StaticRNN benchmark
 
-Takes 1.234471 sec to forward 10 times
+Takes 10.030948 sec to forward 100 times
 
-Takes 2.192764 sec to backward 10 times
+Takes 21.970847 sec to backward 100 times
 
 DynamicRNN benchmark
 
-Takes 1.912993 sec to forward 10 times
+Takes 15.937193 sec to forward 100 times
 
-Takes 32.716191 sec to backward 10 times
+Takes 310.427649 sec to backward 100 times
+
+ForRNN benchmark
+
+Takes 15.545057 sec to forward 100 times
+
+Takes 32.583921 sec to backward 100 times
 

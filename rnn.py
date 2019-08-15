@@ -4,6 +4,7 @@ import paddle.fluid.layers as layers
 import paddle.fluid.core as core
 import time
 
+from paddle.fluid import profiler
 from paddle.fluid import ParamAttr
 from paddle.fluid.framework import Program, grad_var_name
 from paddle.fluid.executor import Executor
@@ -15,9 +16,13 @@ SEQ_LEN = 1000
 BATCH_SIZE = 20
 INPUT_DIM = 50
 
-NUM_ITERATION = 10
+NUM_ITERATION = 100
 
 DEFAULT_PLACE = core.CUDAPlace(0)
+
+STATIC_RNN_MODE = "static"
+DYNAMIC_RNN_MODE = "dynamic"
+FOR_RNN_MODE = "for"
 
 
 def create_tensor(np_data, place, lod=None):
@@ -41,60 +46,86 @@ class SimpleRnn:
         - h
   '''
 
-    def set_up_dynamic(self, x):
-        self.set_up(False, x)
+    def set_up_dynamic(self):
+        self.set_up(DYNAMIC_RNN_MODE, x)
 
-    def set_up_static(self, x):
-        self.set_up(True, x)
+    def set_up_static(self):
+        self.set_up(STATIC_RNN_MODE, x)
 
-    def set_up(self, static, x):
+    def set_up_for(self):
+        self.set_up(FOR_RNN_MODE, x)
+
+    def set_up(self, rnn_mode, x):
         self.main_program = Program()
         self.startup_program = Program()
         self.x = x
-        self.scale = 1.0
+        self.scale = 2.0
         with fluid.program_guard(self.main_program, self.startup_program):
-            self.output = self.net(static)
+            if rnn_mode == STATIC_RNN_MODE:
+                self.output = self.static_rnn_net()
+            elif rnn_mode == DYNAMIC_RNN_MODE:
+                self.output = self.dynamic_rnn_net()
+            else:
+                self.output = self.for_rnn_net()
         lod = [[SEQ_LEN for _ in range(BATCH_SIZE)]]
-        x_tensor = create_tensor(self.x,
-                                 DEFAULT_PLACE) if static else create_tensor(
-                                     self.x, DEFAULT_PLACE, lod)
+        x_tensor = create_tensor(
+            self.x, DEFAULT_PLACE,
+            lod) if rnn_mode == DYNAMIC_RNN_MODE else create_tensor(
+                self.x, DEFAULT_PLACE)
         self.feed_map = {'x': x_tensor}
         self.grad_var_list = {self.main_program.global_block().var('x')}
 
         self.exe = Executor(DEFAULT_PLACE)
         self.exe.run(self.startup_program)
 
-    def net(self, static):
-        if static:
-            x = layers.data(shape=[SEQ_LEN, BATCH_SIZE, INPUT_DIM],
-                            dtype='float32',
-                            name='x',
-                            append_batch_size=False)
-            x.stop_gradient = False
-            rnn = layers.StaticRNN()
-            with rnn.step():
-                x_t = rnn.step_input(x)
-                h_pre = rnn.memory(shape=[-1, INPUT_DIM], batch_ref=x_t)
-                h = layers.scale(x=layers.elementwise_add(x=h_pre, y=x_t),
-                                 scale=self.scale)
-                rnn.update_memory(h_pre, h)
-                rnn.output(h)
-        else:
-            x = layers.data(shape=[BATCH_SIZE * SEQ_LEN, INPUT_DIM],
-                            dtype='float32',
-                            name='x',
-                            append_batch_size=False)
-            x.stop_gradient = False
-            rnn = layers.DynamicRNN()
-            with rnn.block():
-                x_t = rnn.step_input(x)
-                h_pre = rnn.memory(shape=[INPUT_DIM])
-                h = layers.scale(x=layers.elementwise_add(x=h_pre, y=x_t),
-                                 scale=self.scale)
-                rnn.update_memory(h_pre, h)
-                rnn.output(h)
-        #layers.Print(rnn())
+    def static_rnn_net(self):
+        x = layers.data(shape=[SEQ_LEN, BATCH_SIZE, INPUT_DIM],
+                        dtype="float32",
+                        name="x",
+                        append_batch_size=False)
+        x.stop_gradient = False
+        rnn = layers.StaticRNN()
+        with rnn.step():
+            x_t = rnn.step_input(x)
+            h_pre = rnn.memory(shape=[-1, INPUT_DIM], batch_ref=x_t)
+            h = layers.scale(x=layers.elementwise_add(x=h_pre, y=x_t),
+                             scale=self.scale)
+            rnn.update_memory(h_pre, h)
+            rnn.output(h)
         return layers.mean(rnn())
+
+    def dynamic_rnn_net(self):
+        x = layers.data(shape=[BATCH_SIZE * SEQ_LEN, INPUT_DIM],
+                        dtype="float32",
+                        name="x",
+                        append_batch_size=False)
+        x.stop_gradient = False
+        rnn = layers.DynamicRNN()
+        with rnn.block():
+            x_t = rnn.step_input(x)
+            h_pre = rnn.memory(shape=[INPUT_DIM])
+            h = layers.scale(x=layers.elementwise_add(x=h_pre, y=x_t),
+                             scale=self.scale)
+            rnn.update_memory(h_pre, h)
+            rnn.output(h)
+        return layers.mean(rnn())
+
+    def for_rnn_net(self):
+        x = layers.data(shape=[BATCH_SIZE, SEQ_LEN, INPUT_DIM],
+                        dtype="float32",
+                        name="x",
+                        append_batch_size=False)
+        split_x = layers.split(x, num_or_sections=SEQ_LEN, dim=1)
+
+        h_pre = fluid.layers.zeros(shape=[BATCH_SIZE, 1, INPUT_DIM],
+                                   dtype="float32")
+
+        for i in range(SEQ_LEN):
+            x_t = split_x[i]
+            h = layers.scale(x=layers.elementwise_add(x=h_pre, y=x_t),
+                             scale=self.scale)
+            h_pre = h
+        return layers.mean(h_pre)
 
     def forward(self):
         out = self.exe.run(self.main_program,
@@ -114,18 +145,18 @@ class SimpleRnn:
         return out[0]
 
 
-def benchmark(is_static):
+def benchmark(mode):
     x = np.random.uniform(low=0.0,
                           high=1.0,
-                          size=(SEQ_LEN, BATCH_SIZE,
+                          size=(BATCH_SIZE, SEQ_LEN,
                                 INPUT_DIM)).astype("float32")
+    if mode == DYNAMIC_RNN_MODE:
+        x = x.reshape(SEQ_LEN * BATCH_SIZE, INPUT_DIM)
+    elif mode == STATIC_RNN_MODE:
+        x = np.transpose(x, axes=(1, 0, 2))
+
     rnn = SimpleRnn()
-    if is_static:
-        rnn.set_up_static(x)
-    else:
-        x = np.transpose(x, axes=(1, 0, 2)).reshape(
-            (SEQ_LEN * BATCH_SIZE, INPUT_DIM))
-        rnn.set_up_dynamic(x)
+    rnn.set_up(mode, x)
 
     start = time.time()
     for i in range(NUM_ITERATION):
@@ -143,9 +174,11 @@ def benchmark(is_static):
 
 def main():
     print("DynamicRNN benchmark")
-    benchmark(is_static=False)
+    benchmark(mode=DYNAMIC_RNN_MODE)
     print("StaticRNN benchmark")
-    benchmark(is_static=True)
+    benchmark(mode=STATIC_RNN_MODE)
+    print("ForRNN benchmark")
+    benchmark(mode=FOR_RNN_MODE)
 
 
 if __name__ == '__main__':

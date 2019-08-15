@@ -1,9 +1,9 @@
-from rnn import SimpleRnn, benchmark
+from rnn import SimpleRnn, STATIC_RNN_MODE, benchmark
 
 
 def main():
     print("StaticRNN benchmark")
-    benchmark(is_static=True)
+    benchmark(STATIC_RNN_MODE)
 
 
 if __name__ == '__main__':

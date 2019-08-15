@@ -1,9 +1,9 @@
-from rnn import SimpleRnn, benchmark
+from rnn import SimpleRnn, DYNAMIC_RNN_MODE, benchmark
 
 
 def main():
     print("DynamicRNN benchmark")
-    benchmark(is_static=False)
+    benchmark(DYNAMIC_RNN_MODE)
 
 
 if __name__ == '__main__':
